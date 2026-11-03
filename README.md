@@ -5,7 +5,7 @@ Aplicación portable para emular la consulta de productos de cobranza desde banc
 ## Uso
 
 1. Selecciona un producto: **SEP - Servicio Electrónico de Pagos**, **SEP - Servicios de Efectivo**, **Cobranza Universal**, **Concentración de Fondos** o **Domiciliación**. En SEP - Servicio Electrónico de Pagos, elige **Con Autelis** o **Sin Autelis**: cada variante conserva un archivo independiente. Los movimientos iniciales son ficticios.
-2. Pulsa **Cargar archivo**, selecciona el producto y la variante SEP cuando aplique, y abre un `.xlsx`, `.xls` o `.json` local.
+2. Pulsa **Cargar archivo**, selecciona el producto y la variante SEP cuando aplique, y abre un `.xlsx`, `.xls`, `.json`, **`.csv` o `.zip`** local. SEP/SEF se reconocen por sus columnas; los nombres con/sin Autelis sugieren la variante, que puedes cambiar antes de confirmar.
 3. Elige la hoja y la fila de encabezados; confirma las columnas de fecha, referencia, cliente, importe, estado y moneda. Fecha e importe son obligatorios. Si falta moneda, elige la predeterminada.
 4. Consulta los movimientos con búsqueda, fechas, estado, moneda, paginación y detalle de todas las columnas originales. Los resúmenes corresponden al resultado filtrado; las monedas no se suman entre sí.
 5. **Exportar JSON** descarga solamente el resultado filtrado. Puede importarse de nuevo.
@@ -16,11 +16,16 @@ Cada carga reemplaza los movimientos de un solo producto y variante. Cancelar un
 
 - **Hasta 800 MB por archivo**, definidos como 800 × 1024 × 1024 = **838,860,800 bytes**, incluidos. Se rechazan archivos mayores antes de leerlos. Se eliminaron los límites artificiales de 50,000 filas y 200 columnas.
 - Excel: `.xlsx` y `.xls`, una hoja por carga. Se consulta primero el catálogo de hojas y se decodifica la hoja seleccionada en un Web Worker local. Los libros protegidos con contraseña no se admiten. Las fórmulas se leen por su valor guardado; no se recalculan. Guardar referencias con ceros iniciales como texto en Excel.
+- **CSV directo**: lectura por bloques con índices de filas sobre bytes originales. Separador coma, punto y coma o tabulador; comillas escapadas, saltos de línea dentro de celdas, CRLF y UTF-8 (con/sin BOM). Se detecta Windows-1252 si el archivo no es UTF-8 válido. UTF-16 requiere reexportar a UTF-8. Identificadores y referencias se conservan como texto, incluidos ceros iniciales y puntos finales de cuentas.
+- **ZIP directo**: un archivo CSV, Excel o JSON compatible dentro del ZIP, sin necesidad de extraerlo manualmente. Se admiten métodos almacenado y deflate y se verifican tamaño y CRC32. Tanto el ZIP como el archivo descomprimido deben respetar 800 MB. ZIP64, contraseñas o varios archivos de datos requieren extracción manual. Se usa `DecompressionStream('deflate-raw')` de navegadores recientes; no hay descarga de bibliotecas ni conexión de red.
+- **Filas incompletas de CSV**: se excluye la última fila truncada y las filas con una cantidad de campos distinta al encabezado; se muestra un aviso con el número excluido y se conserva en la exportación. No se rellenan columnas para presentar registros incompletos como válidos. Un CSV sin movimientos completos se rechaza.
 - JSON UTF-8: una lista de objetos o un objeto con `movimientos: [...]`. Incluye un ejemplo en `examples/cobranza.json`. La propiedad `producto` es informativa: el usuario selecciona el destino de la carga.
 - JSON se lee por bloques con decodificación UTF-8 incremental, sin concatenar todo el archivo en una sola cadena. El contenedor opcional admite hasta 1 MB de metadatos antes y después de `movimientos`; para metadatos mayores usar la lista directa. Cada movimiento debe ser un objeto JSON.
 - Fechas: seriales de Excel (sistemas 1900 y 1904), `AAAA-MM-DD` o `DD/MM/AAAA`. Las fechas que no se pueden interpretar se señalan y no se incluyen en filtros de fecha.
 - Importes: números o textos como `1,234.56`, `1.234,56`, `1234,56`; los importes inválidos se señalan y se excluyen del resumen. Los valores negativos se conservan.
 - Estados: aplicado/conciliado/pagado/exitoso/liquidado → Aplicado; pendiente/en proceso/por conciliar → Pendiente; rechazado/devuelto/cancelado → Rechazado. Los demás se muestran como Sin clasificar; su valor original permanece en el detalle.
+- **Moneda confirmada por el usuario**: `1`/`001` → MXN (pesos); `5`/`005` → USD. El código original se conserva en el detalle. Los códigos restantes permanecen sin equivalencia asignada y nunca se suman entre sí.
+- `CVE_ESTATUSTXN` se muestra y filtra por su valor original. No se presupone que un código numérico signifique aplicado, pendiente o rechazado; esos indicadores aparecen como no disponibles cuando solo hay códigos sin catálogo confirmado.
 - No se deduplican filas ni se descartan totales automáticamente. El archivo debe contener una tabla de movimientos; filas de resumen o encabezados intermedios deben quitarse o revisarse antes de presentar cifras.
 
 ## Capacidad y archivos grandes
@@ -33,17 +38,20 @@ La prueba automatizada procesa un flujo JSON válido de exactamente 800 MiB con 
 
 ## Adaptación a los archivos reales
 
-La selección de columnas permite explorar archivos sin conocer todavía su estructura. Cuando estén disponibles los Excel de cada producto, se pueden ajustar nombres, estados, encabezados, reglas, convenios y vistas específicas. Los productos precargados no representan un catálogo real de contratos.
+Se incluyen perfiles para los encabezados SEP y SEF recibidos: `FEC_TRANSACCION`, `IMP_TRANSACCION`, `CVE_ESTATUSTXN`, `CVE_MONEDASISTEMA`, `NUM_CLIENTE`, referencias, sucursales, autorizaciones y `NUM_AUTELIS151`, cuando existen. La tabla se adapta al producto; el detalle conserva todas las columnas originales. Los filtros exactos por número de cliente y cuenta permiten emular la consulta de un cliente dentro de un archivo con múltiples clientes. No sustituyen autenticación ni autorización de acceso.
+
+Los ejemplos de `examples/sep-con-autelis.csv`, `examples/sep-sin-autelis.csv` y `examples/sef.csv` son **sintéticos**. Los archivos del usuario no se incorporan al repositorio ni al HTML. Las pruebas usan únicamente ejemplos ficticios. Los productos precargados no representan un catálogo real de contratos.
 
 La demostración trabaja con archivos locales. En una implementación posterior, un adaptador autorizado podrá entregar los movimientos de la vista de Teradata al mismo modelo de consulta; esta versión no incluye conexión a Teradata.
 
 ## Desarrollo y verificación
 
-- `src/shell.html`, `src/styles.css`, `src/core.js`, `src/app.js`, `src/worker.js`: fuentes editables; el worker y su lector Excel se incluyen dentro del HTML portable.
+- `src/shell.html`, `src/styles.css`, `src/core.js`, `src/app.js`, `src/files.js`, `src/worker.js`: fuentes editables; el worker y todos los lectores se incluyen dentro del HTML portable.
 - `vendor/xlsx.full.min.js`: SheetJS Community Edition 0.20.3, incluida localmente bajo Apache 2.0; licencia en `vendor/SHEETJS-LICENSE.txt`. Distribución oficial: https://docs.sheetjs.com/docs/getting-started/installation/standalone/.
 - `build.ps1`: genera el HTML portable desde las fuentes, sin descargar dependencias. Ejecutar `powershell -ExecutionPolicy Bypass -File ./build.ps1`.
 - `tests/core.test.cjs`: pruebas de importes, fechas, normalización, contenido no confiable y lectura de Excel con múltiples hojas. Ejecutar con Node.js: `node tests/core.test.cjs`.
 - `tests/worker.test.cjs`: JSON incremental, límite de 800 MiB, más de 50,000 movimientos, filtros, detalle, exportación y XLS/XLSX. Ejecutar `node tests/worker.test.cjs`.
 - `tests/app.test.cjs`: integración de interfaz y worker empaquetado, cinco productos y persistencia independiente de ambas variantes SEP. Ejecutar `node tests/app.test.cjs`. Usa un DOM mínimo para probar comportamiento; no sustituye una revisión visual en navegador.
+- `tests/files.test.cjs`: CSV incremental, ZIP/CRC32, perfiles SEP/SEF, monedas confirmadas, filtros por cliente/cuenta y exclusión de filas incompletas. Ejecutar `node tests/files.test.cjs` con Node.js 22 o posterior (requiere `DecompressionStream` con deflate-raw).
 
 La política de contenido del HTML bloquea conexiones de red. Las celdas y nombres de archivo se insertan como texto escapado. No hay telemetría ni almacenamiento persistente.
