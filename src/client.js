@@ -7,8 +7,8 @@ function clearClientResults(message='Selecciona un cliente para consultar sus pr
  clientSummaries=[];includedProducts.clear();clientDetailProduct=null;clientDetailVersion++;$('clientProductCards').innerHTML='';$('clientTotals').innerHTML='';$('clientOperationCount').textContent='0';$('clientProductCount').textContent='0';$('clientSummaryMessage').textContent=message;$('clientDetailSection').classList.add('hidden');$('clientExportAll').disabled=true;$('clientSepField').classList.add('hidden');$('clientRows').innerHTML='';$('clientTitle').textContent='Consulta del cliente';$('clientIdentity').textContent='';
 }
 async function showView(view){
- activeView=view;clientVersion++;clientDetailVersion++;$('detailDialog').close();$('loadView').classList.toggle('hidden',view!=='load');$('clientView').classList.toggle('hidden',view!=='client');$('viewLoad').setAttribute('aria-pressed',String(view==='load'));$('viewClient').setAttribute('aria-pressed',String(view==='client'));
- if(view==='load'){renderProducts();resetFilters();}if(view==='client'){clearClientResults('Buscando clientes en los archivos cargados…');await refreshClientDirectory();}
+ activeView=view;clientVersion++;clientDetailVersion++;$('detailDialog').close();$('loadView').classList.toggle('hidden',view!=='load');$('clientView').classList.toggle('hidden',view!=='client');$('monthlyView').classList.toggle('hidden',view!=='monthly');$('viewMonthly').setAttribute('aria-pressed',String(view==='monthly'));globalThis.invalidateMonthlyView?.();$('viewLoad').setAttribute('aria-pressed',String(view==='load'));$('viewClient').setAttribute('aria-pressed',String(view==='client'));
+ if(view==='monthly'){await initializeMonthlyView();}if(view==='load'){renderProducts();resetFilters();}if(view==='client'){clearClientResults('Buscando clientes en los archivos cargados…');await refreshClientDirectory();}
 }
 async function refreshClientDirectory(){
  const token=++clientVersion;clientDetailVersion++;const merged=new Map();clearClientResults('Buscando clientes en los archivos cargados…');$('clientPicker').disabled=true;
@@ -60,7 +60,7 @@ async function exportClient(all){
  const parts=all?['{"numeroCliente":'+JSON.stringify(id)+',"productos":[',...blobs.flatMap((blob,i)=>i?[',',blob]:[blob]),']}']:blobs;const url=URL.createObjectURL(new Blob(parts,{type:'application/json;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='consulta-cliente-'+id.replace(/[^a-z0-9_-]/gi,'')+(all?'-global':'-movimientos')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  }catch(e){$('clientSummaryMessage').textContent='No se pudo exportar: '+e.message;}finally{if(id===consultClientId&&token===clientVersion)button.disabled=false;}
 }
-globalThis.clientFilesChanged=()=>{clientVersion++;clientDetailVersion++;if(activeView==='client')refreshClientDirectory();};
+globalThis.clientFilesChanged=()=>{clientVersion++;clientDetailVersion++;globalThis.invalidateMonthlyView?.();if(activeView==='client')refreshClientDirectory();if(activeView==='monthly')initializeMonthlyView();};
 $('viewLoad').onclick=()=>showView('load');$('viewClient').onclick=()=>showView('client');$('clientRefresh').onclick=refreshClientDirectory;$('clientLookup').oninput=renderClientOptions;
 $('clientPicker').onchange=()=>{consultClientId=$('clientPicker').value;$('detailDialog').close();return loadClientSummary();};
 ['clientFrom','clientTo','clientCurrency'].forEach(id=>$(id).onchange=loadClientSummary);

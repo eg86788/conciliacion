@@ -4,7 +4,7 @@ Aplicación portable para emular la consulta de productos de cobranza desde banc
 
 ## Uso
 
-La aplicación tiene dos vistas: **Carga de archivos** para incorporar y revisar los archivos, y **Consulta del cliente** para emular la consulta de un cliente específico. Ambas inician sin registros; no hay datos de ejemplo precargados ni función para restaurarlos.
+La aplicación tiene tres vistas: **Carga de archivos** para incorporar y revisar los archivos, **Consulta del cliente** para emular la consulta de un cliente específico y **Global por mes** para revisar todos los clientes agrupados por mes y año de transacción. Todas inician sin registros; no hay datos de ejemplo precargados ni función para restaurarlos.
 
 1. Selecciona un producto: **SEP - Servicio Electrónico de Pagos**, **SEP - Servicios de Efectivo**, **Cobranza Universal**, **Concentración de Fondos** o **Domiciliación**. En SEP - Servicio Electrónico de Pagos, elige **Con Autelis** o **Sin Autelis**: cada variante conserva un archivo independiente. Todos los productos y variantes inician vacíos. Solo se muestran movimientos de archivos cargados por el usuario.
 2. Pulsa **Cargar archivo**, selecciona el producto y la variante SEP cuando aplique, y abre un `.xlsx`, `.xls`, `.json`, **`.csv` o `.zip`** local. SEP/SEF se reconocen por sus columnas; los nombres con/sin Autelis sugieren la variante, que puedes cambiar antes de confirmar.
@@ -23,6 +23,15 @@ Cada carga reemplaza los movimientos de un solo producto y variante. Cancelar un
 5. Usa **Consultar movimientos** para abrir el detalle del producto. Búsqueda, paginación, detalle de la operación y exportación quedan restringidos al cliente seleccionado. La exportación global incluye los productos marcados; la exportación de movimientos incluye el producto abierto y sus filtros. El JSON global es una consulta con varios productos, mientras que el JSON de movimientos puede volver a importarse como una tabla.
 
 Las acciones `clientQuery`, `clientDetail` y `clientExport` del worker exigen un número de cliente y fuerzan el filtro exacto correspondiente, aunque otro filtro intente sustituirlo. Al cambiar de cliente se limpian los resultados anteriores y se descartan respuestas pendientes de la consulta previa. Esto es una simulación local; no constituye autenticación ni una barrera de acceso entre usuarios de un equipo que dispone de los archivos completos.
+
+## Global por mes
+
+- **Global por mes** enlista todos los clientes con número identificable en los archivos seleccionados. Cada fila representa un cliente y un mes/año de la **fecha de la transacción**, consolidando los productos incluidos. Se muestran número y nombre del cliente, número de productos, total de transacciones e importes por moneda.
+- Se incluyen subtotales de cada mes para todos los clientes del filtro, además de los totales de la consulta. El contador de clientes es de clientes únicos, aunque un cliente aparezca en varios meses. MXN, USD y cualquier otra moneda permanecen separados.
+- Permite filtrar por mes inicial/final (ambos incluidos), cliente y moneda, y elegir los productos que se suman. Para SEP se incluye un solo archivo, con o sin Autelis, seleccionado explícitamente cuando ambos están cargados.
+- Las operaciones sin fecha válida aparecen en **Sin fecha válida** cuando no se exige un rango mensual. Los registros sin número de cliente se omiten del listado y se informa su cantidad. Los importes inválidos se excluyen de las sumas, pero su transacción se cuenta y se señala. Las filas incompletas continúan excluidas durante la carga.
+- La paginación muestra 25 grupos cliente/mes por página. Los subtotales de mes siempre corresponden a todos los clientes del filtro, no solo a la página visible. **Exportar resumen JSON** incluye todos los grupos filtrados, incluso los de otras páginas; es un resumen agregado, no un archivo de movimientos para reimportar.
+- La agregación se calcula en el worker de cada archivo y se conserva mientras ese archivo esté cargado. La interfaz recibe grupos resumidos y solo dibuja la página visible, conservando el funcionamiento local y portable.
 
 ## Formatos y límites
 
@@ -58,12 +67,12 @@ La demostración trabaja con archivos locales. En una implementación posterior,
 
 ## Desarrollo y verificación
 
-- `src/shell.html`, `src/styles.css`, `src/core.js`, `src/app.js`, `src/client.js`, `src/files.js`, `src/worker.js`: fuentes editables; las dos vistas, el worker y todos los lectores se incluyen dentro del HTML portable.
+- `src/shell.html`, `src/styles.css`, `src/core.js`, `src/app.js`, `src/client.js`, `src/monthly.js`, `src/files.js`, `src/worker.js`: fuentes editables; las tres vistas, el worker y todos los lectores se incluyen dentro del HTML portable.
 - `vendor/xlsx.full.min.js`: SheetJS Community Edition 0.20.3, incluida localmente bajo Apache 2.0; licencia en `vendor/SHEETJS-LICENSE.txt`. Distribución oficial: https://docs.sheetjs.com/docs/getting-started/installation/standalone/.
 - `build.ps1`: genera el HTML portable desde las fuentes, sin descargar dependencias. Ejecutar `powershell -ExecutionPolicy Bypass -File ./build.ps1`.
 - `tests/core.test.cjs`: pruebas de importes, fechas, normalización, contenido no confiable y lectura de Excel con múltiples hojas. Ejecutar con Node.js: `node tests/core.test.cjs`.
 - `tests/worker.test.cjs`: JSON incremental, límite de 800 MiB, más de 50,000 movimientos, filtros, detalle, exportación y XLS/XLSX. Ejecutar `node tests/worker.test.cjs`.
-- `tests/app.test.cjs`: inicio sin datos ficticios, integración de ambas vistas y worker empaquetado, cinco productos, variantes SEP independientes, totales globales de tres productos por moneda, aislamiento del detalle/exportación por cliente, selección de productos y filtros. Ejecutar `node tests/app.test.cjs`. Usa un DOM mínimo para probar comportamiento; no sustituye una revisión visual en navegador.
+- `tests/app.test.cjs`: inicio sin datos ficticios, integración de las tres vistas y worker empaquetado, variantes SEP independientes, totales por producto y moneda, aislamiento por cliente, agrupación mensual entre distintos años, subtotales, filtros, paginación y exportación de todas las páginas. Ejecutar `node tests/app.test.cjs`. Usa un DOM mínimo para probar comportamiento; no sustituye una revisión visual en navegador.
 - `tests/files.test.cjs`: CSV incremental, ZIP/CRC32, perfiles SEP/SEF, monedas confirmadas, filtros por cliente/cuenta y exclusión de filas incompletas. Ejecutar `node tests/files.test.cjs` con Node.js 22 o posterior (requiere `DecompressionStream` con deflate-raw).
 
 La política de contenido del HTML bloquea conexiones de red. Las celdas y nombres de archivo se insertan como texto escapado. No hay telemetría ni almacenamiento persistente.
