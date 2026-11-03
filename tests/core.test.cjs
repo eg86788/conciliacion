@@ -1,0 +1,20 @@
+const fs=require('node:fs');
+const vm=require('node:vm');
+const assert=require('node:assert/strict');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const context={};vm.createContext(context);
+vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),context);
+const C=context.ReconCore;
+for(const [value,expected] of [['1,234.56',1234.56],['1.234,56',1234.56],['1234,56',1234.56],['(1,234.50)',-1234.5],['$ 0.00',0],['',null],['abc',null],['1,2,3',null]])assert.equal(C.amount(value),expected);
+assert.equal(C.date('28/10/2026'),'2026-10-28');assert.equal(C.date('2026-02-30'),'');assert.equal(C.date('31/02/2026'),'');assert.equal(C.date(1),'1899-12-31');
+const headers=['Fecha operación','Referencia','Cliente','Importe','Estado','Moneda','Extra'];
+const mapping=C.suggest(headers);assert.equal(mapping.date,0);assert.equal(mapping.amount,3);
+const rows=C.normalize([['28/10/2026','000123','<img src=x onerror=alert(1)>','1.234,56','Conciliado','MXN','Original'],['bad','000124','Otro','bad','No conocido','USD','x'],[]],mapping,headers,'MXN');
+assert.equal(rows.length,2);assert.equal(rows[0].reference,'000123');assert.equal(rows[0].status,'Aplicado');assert.equal(rows[0].raw[6][1],'Original');assert.equal(rows[1].amount,null);assert.equal(rows[1].status,'Sin clasificar');
+vm.runInContext(fs.readFileSync(path.join(root,'vendor/xlsx.full.min.js'),'utf8'),context);
+const X=context.XLSX;const workbook=X.utils.book_new();X.utils.book_append_sheet(workbook,X.utils.aoa_to_sheet([headers,['2026-10-28','000001','Cliente',125.5,'Aplicado','MXN','Extra']]),'Referenciada');X.utils.book_append_sheet(workbook,X.utils.aoa_to_sheet([['Fecha','Monto'],['2026-10-27',25]]),'Otra hoja');
+for(const bookType of ['xlsx','biff8']){const bytes=X.write(workbook,{type:'array',bookType});const read=X.read(bytes,{type:'array'});assert.equal(read.SheetNames.length,2);const matrix=X.utils.sheet_to_json(read.Sheets.Referenciada,{header:1,defval:'',raw:true});const parsed=C.normalize(matrix.slice(1),C.suggest(matrix[0]),matrix[0],'MXN');assert.equal(parsed[0].reference,'000001');assert.equal(parsed[0].amount,125.5);}
+const html=fs.readFileSync(path.join(root,'index.html'),'utf8');assert.ok(html.includes("connect-src 'none'"));assert.ok(!/<script[^>]+src=/i.test(html));assert.ok(!html.includes('/* APP */'));assert.ok(!html.includes('/* VENDOR */'));
+new vm.Script(fs.readFileSync(path.join(root,'src/app.js'),'utf8'));
+console.log('OK: importes, fechas, normalización, conservación de columnas, XLS/XLSX multihoja, sintaxis y empaquetado sin red.');

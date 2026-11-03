@@ -1,0 +1,8 @@
+{
+  "producto": "Cobranza referenciada",
+  "movimientos": [
+    {"fecha":"2026-10-28","referencia":"0000123401","cliente":"Empresa ficticia A","importe":15000.50,"moneda":"MXN","estado":"Aplicado","convenio":"DEMO-701"},
+    {"fecha":"2026-10-28","referencia":"0000123402","cliente":"Empresa ficticia B","importe":8900,"moneda":"MXN","estado":"Pendiente","convenio":"DEMO-701"},
+    {"fecha":"2026-10-27","referencia":"0000123403","cliente":"Empresa ficticia C","importe":2350.75,"moneda":"MXN","estado":"Rechazado","convenio":"DEMO-701"}
+  ]
+}
