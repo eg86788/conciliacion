@@ -1,7 +1,7 @@
 /* Se ejecuta dentro de un Web Worker local; nunca accede a la red. */
 'use strict';
 const MAX_FILE_BYTES=800*1024*1024;
-let sourceFile=null,kind='',workbook=null,jsonRows=null,headers=[],matrix=null,records=[],mapping=null,defaultCurrency='MXN',csv=null,csvHeader=0,dataProfile='',columnMap=null;
+let sourceFile=null,kind='',workbook=null,jsonRows=null,headers=[],matrix=null,records=[],mapping=null,defaultCurrency='MXN',csv=null,csvHeader=0,dataProfile='',columnMap=null,clientGroups=new Map();
 const scalar=v=>v&&typeof v==='object'?JSON.stringify(v):v??'';
 function validateFile(file){if(!file||file.size>MAX_FILE_BYTES)throw Error('El archivo supera el límite de 800 MB (838,860,800 bytes).');if(!/\.(xlsx|xls|json|csv|zip)$/i.test(file.name))throw Error('Selecciona un archivo Excel, JSON, CSV o ZIP.');}
 function progress(message,percent){self.postMessage({progress:true,message,percent});}
@@ -48,7 +48,7 @@ async function readJSON(file){
 function getRaw(index){return kind==='csv'?csv.row(index+csvHeader+1):kind==='json'?headers.map(h=>scalar(jsonRows[index][h])):matrix[index];}
 function original(index){const row=getRaw(index);return headers.map((h,j)=>[h,String(row[j]??'')]);}
 async function open(file){
- validateFile(file);records=[];matrix=null;workbook=null;jsonRows=null;csv=null;dataProfile='';columnMap=null;
+ validateFile(file);records=[];clientGroups=new Map();matrix=null;workbook=null;jsonRows=null;csv=null;dataProfile='';columnMap=null;
  if(/\.zip$/i.test(file.name)){progress('Abriendo ZIP local…',null);file=await ReconFiles.unzip(file);validateFile(file);}
  sourceFile=file;kind=/\.json$/i.test(file.name)?'json':/\.csv$/i.test(file.name)?'csv':'excel';
  if(kind==='csv'){csv=await new ReconFiles.CSVIndex().read(file,progress);headers=csv.row(0);dataProfile=ReconCore.profile(headers);return {kind,sheets:['Movimientos CSV'],fileName:file.name,profile:dataProfile,encoding:csv.encoding,warning:csv.warning};}
@@ -71,24 +71,28 @@ async function prepare(sheet,headerRow){
  if(!matrix.length)throw Error('No hay movimientos después de la fila de encabezados.');return {headers,preview:matrix.slice(0,3),count:matrix.length};
 }
 async function commit(map,currency){
- mapping=map;defaultCurrency=currency;records=[];dataProfile=ReconCore.profile(headers);columnMap=dataProfile?ReconCore.bankFields(headers):null;const currencies=new Set(),statuses=new Set();let badDate=0,badAmount=0,excluded=csv?.excluded||0;const length=kind==='csv'?csv.count-csvHeader-1:kind==='json'?jsonRows.length:matrix.length;
+ mapping=map;defaultCurrency=currency;records=[];clientGroups=new Map();dataProfile=ReconCore.profile(headers);columnMap=ReconCore.bankFields(headers);const currencies=new Set(),statuses=new Set();let badDate=0,badAmount=0,excluded=csv?.excluded||0;const length=kind==='csv'?csv.count-csvHeader-1:kind==='json'?jsonRows.length:matrix.length;
  for(let i=0;i<length;i++){
   let raw=getRaw(i);if(kind==='excel'&&workbook.date1904&&typeof raw[map.date]==='number'){raw=raw.slice();raw[map.date]+=1462;}
   if(!raw.some(v=>v!==''&&v!=null))continue;if(kind==='csv'&&raw.length!==headers.length){excluded++;continue;}
   const record=ReconCore.normalizeOne(raw,map,headers,currency,false,columnMap);record.id=i+1;records.push(record);currencies.add(record.currency);statuses.add(record.rawStatus);if(!record.date)badDate++;if(record.amount===null)badAmount++;
+  if(record.clientId){let group=clientGroups.get(record.clientId);if(!group){group={id:record.clientId,name:record.name!==record.clientId?record.name:'',indices:[]};clientGroups.set(record.clientId,group);}group.indices.push(records.length-1);}
   if(i%10000===0){progress('Preparando consulta · '+i.toLocaleString('es-MX')+' movimientos',Math.round(i/length*100));await new Promise(resolve=>setTimeout(resolve,0));}
  }
  if(!records.length)throw Error('No se encontraron movimientos completos.');sourceFile=null;return {count:records.length,currencies:[...currencies].sort(),rawStatuses:[...statuses].sort(),profile:dataProfile,excluded,warning:excluded?(excluded===1?'Se excluyó 1 fila incompleta. ':'Se excluyeron '+excluded.toLocaleString('es-MX')+' filas incompletas. ')+(csv?.excluded?'El archivo de origen termina truncado.':'Las filas con una cantidad de columnas distinta al encabezado se omitieron de la consulta.'):'',badDate,badAmount};
 }
 function matches(row,filter){return (!filter.from||row.date&&row.date>=filter.from)&&(!filter.to||row.date&&row.date<=filter.to)&&(!filter.status||(filter.status.startsWith('code:')?row.rawStatus===filter.status.slice(5):row.status===filter.status))&&(!filter.currency||row.currency===filter.currency)&&(!filter.clientId||row.clientId===filter.clientId)&&(!filter.account||row.account===filter.account)&&(!filter.q||ReconCore.clean(original(row.id-1).flat().join(' ')).includes(filter.q));}
-function query(filter,page=1,pageSize=10){
+function query(filter,page=1,pageSize=10,candidates=records){
  const totals=new Map(),counts={applied:0,pending:0,rejected:0,unknown:0,missing:0};let count=0;const items=[];const start=(page-1)*pageSize;let last=[];
- for(const row of records){if(!matches(row,filter))continue;if(row.amount!==null)totals.set(row.currency,(totals.get(row.currency)||0)+Math.round(row.amount*100));else counts.missing++;
+ for(const row of candidates){if(!matches(row,filter))continue;if(row.amount!==null)totals.set(row.currency,(totals.get(row.currency)||0)+Math.round(row.amount*100));else counts.missing++;
   if(row.status==='Aplicado')counts.applied++;else if(row.status==='Pendiente')counts.pending++;else if(row.status==='Rechazado')counts.rejected++;else counts.unknown++;
   if(count>=start&&items.length<pageSize)items.push(row);if(count%pageSize===0)last=[];last.push(row);count++;
  }
  const pages=Math.max(1,Math.ceil(count/pageSize));return {count,counts,totals:[...totals],page:Math.min(page,pages),pages,items:page>pages?last:items};
 }
 function detail(id){const record=records.find(r=>r.id===id);return record?{...record,raw:original(id-1)}:null;}
-function exportJSON(filter,meta){const parts=[JSON.stringify(meta).slice(0,-1)+',"movimientos":['];let first=true,chunk=[];for(const row of records){if(!matches(row,filter))continue;chunk.push((first?'':',')+JSON.stringify({fecha:row.date,referencia:row.reference,cliente:row.name,importe:row.amount,moneda:row.currency,estado:row.rawStatus,datosOriginales:original(row.id-1)}));first=false;if(chunk.length===500){parts.push(chunk.join(''));chunk=[];}}parts.push(chunk.join(''),']}');return new Blob(parts,{type:'application/json;charset=utf-8'});}
-self.onmessage=async({data})=>{try{let result;switch(data.action){case 'open':result=await open(data.file);break;case 'prepare':result=await prepare(data.sheet,data.headerRow);break;case 'commit':result=await commit(data.map,data.currency);break;case 'query':result=query(data.filter,data.page);break;case 'detail':result=detail(data.rowId);break;case 'export':result=exportJSON(data.filter,data.meta);break;default:throw Error('Acción desconocida.');}self.postMessage({id:data.id,result});}catch(error){self.postMessage({id:data.id,error:error.message+' Si el navegador agota la memoria, divide el archivo o usa JSON.'});}};
+function exportJSON(filter,meta,candidates=records){const parts=[JSON.stringify(meta).slice(0,-1)+',"movimientos":['];let first=true,chunk=[];for(const row of candidates){if(!matches(row,filter))continue;chunk.push((first?'':',')+JSON.stringify({fecha:row.date,referencia:row.reference,cliente:row.name,numeroCliente:row.clientId||'',importe:row.amount,moneda:row.currency,estado:row.rawStatus,datosOriginales:original(row.id-1)}));first=false;if(chunk.length===500){parts.push(chunk.join(''));chunk=[];}}parts.push(chunk.join(''),']}');return new Blob(parts,{type:'application/json;charset=utf-8'});}
+function clientRows(id){if(typeof id!=='string'||!id.trim())throw Error('Selecciona un cliente para consultar sus operaciones.');return (clientGroups.get(id)?.indices||[]).map(index=>records[index]);}
+function clientQuery(id,filter={},page=1){return query({...filter,clientId:id},page,10,clientRows(id));}
+function clientDetail(id,rowId){const row=clientRows(id).find(r=>r.id===rowId);return row?{...row,raw:original(row.id-1)}:null;}
+self.onmessage=async({data})=>{try{let result;switch(data.action){case 'open':result=await open(data.file);break;case 'prepare':result=await prepare(data.sheet,data.headerRow);break;case 'commit':result=await commit(data.map,data.currency);break;case 'query':result=query(data.filter,data.page);break;case 'detail':result=detail(data.rowId);break;case 'export':result=exportJSON(data.filter,data.meta);break;case 'clients':result=[...clientGroups.values()].map(g=>({id:g.id,name:g.name,count:g.indices.length}));break;case 'clientQuery':result=clientQuery(data.clientId,data.filter,data.page);break;case 'clientDetail':result=clientDetail(data.clientId,data.rowId);break;case 'clientExport':result=exportJSON({...data.filter,clientId:data.clientId},{...data.meta,numeroCliente:data.clientId},clientRows(data.clientId));break;default:throw Error('Acción desconocida.');}self.postMessage({id:data.id,result});}catch(error){self.postMessage({id:data.id,error:error.message+' Si el navegador agota la memoria, divide el archivo o usa JSON.'});}};

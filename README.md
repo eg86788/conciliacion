@@ -4,13 +4,25 @@ Aplicación portable para emular la consulta de productos de cobranza desde banc
 
 ## Uso
 
-1. Selecciona un producto: **SEP - Servicio Electrónico de Pagos**, **SEP - Servicios de Efectivo**, **Cobranza Universal**, **Concentración de Fondos** o **Domiciliación**. En SEP - Servicio Electrónico de Pagos, elige **Con Autelis** o **Sin Autelis**: cada variante conserva un archivo independiente. Los movimientos iniciales son ficticios.
+La aplicación tiene dos vistas: **Carga de archivos** para incorporar y revisar los archivos, y **Consulta del cliente** para emular la consulta de un cliente específico. Ambas inician sin registros; no hay datos de ejemplo precargados ni función para restaurarlos.
+
+1. Selecciona un producto: **SEP - Servicio Electrónico de Pagos**, **SEP - Servicios de Efectivo**, **Cobranza Universal**, **Concentración de Fondos** o **Domiciliación**. En SEP - Servicio Electrónico de Pagos, elige **Con Autelis** o **Sin Autelis**: cada variante conserva un archivo independiente. Todos los productos y variantes inician vacíos. Solo se muestran movimientos de archivos cargados por el usuario.
 2. Pulsa **Cargar archivo**, selecciona el producto y la variante SEP cuando aplique, y abre un `.xlsx`, `.xls`, `.json`, **`.csv` o `.zip`** local. SEP/SEF se reconocen por sus columnas; los nombres con/sin Autelis sugieren la variante, que puedes cambiar antes de confirmar.
 3. Elige la hoja y la fila de encabezados; confirma las columnas de fecha, referencia, cliente, importe, estado y moneda. Fecha e importe son obligatorios. Si falta moneda, elige la predeterminada.
 4. Consulta los movimientos con búsqueda, fechas, estado, moneda, paginación y detalle de todas las columnas originales. Los resúmenes corresponden al resultado filtrado; las monedas no se suman entre sí.
 5. **Exportar JSON** descarga solamente el resultado filtrado. Puede importarse de nuevo.
 
-Cada carga reemplaza los movimientos de un solo producto y variante. Cancelar una carga conserva los datos anteriores. Los datos permanecen en memoria y se descartan al cerrar o recargar la página. Restablecer los ejemplos requiere confirmación. No hay autenticación real ni conciliación automática. La interfaz utiliza una paleta azul, rojo y blanco de Banamex; es una demostración.
+Cada carga reemplaza los movimientos de un solo producto y variante. Cancelar una carga conserva los datos anteriores. Los datos permanecen en memoria y se descartan al cerrar o recargar la página. No hay autenticación real ni conciliación automática. La interfaz utiliza una paleta azul, rojo y blanco de Banamex; es una demostración.
+
+## Consulta del cliente
+
+1. Carga los archivos de los productos en **Carga de archivos**. En la asignación de columnas, confirma **Número de cliente** (`NUM_CLIENTE`, `numeroCliente` o una columna elegida manualmente). Los archivos sin identificador de cliente pueden revisarse en la carga, pero no se mezclan en el portal del cliente.
+2. Abre **Consulta del cliente**, busca por número o nombre y selecciona el cliente que quieres simular. Se muestran solo los productos con operaciones de ese identificador en los archivos cargados. Los contratos se emulan a partir de la presencia de operaciones; no hay un catálogo real de contratación.
+3. Consulta el total por producto y el **total global**. Marca los productos que quieres incluir y filtra por fechas o moneda. Se suman los importes de las transacciones por moneda: MXN y USD aparecen separados, sin conversión de divisas. Los importes inválidos se excluyen y se informa su cantidad.
+4. SEP con y sin Autelis son archivos alternativos de un mismo producto: **solo se incluye una variante en el total global** para evitar sumar ambos archivos como si fueran productos diferentes. Se prefiere la variante activa que tenga operaciones del cliente; puedes cambiarla en la consulta cuando ambas están disponibles.
+5. Usa **Consultar movimientos** para abrir el detalle del producto. Búsqueda, paginación, detalle de la operación y exportación quedan restringidos al cliente seleccionado. La exportación global incluye los productos marcados; la exportación de movimientos incluye el producto abierto y sus filtros. El JSON global es una consulta con varios productos, mientras que el JSON de movimientos puede volver a importarse como una tabla.
+
+Las acciones `clientQuery`, `clientDetail` y `clientExport` del worker exigen un número de cliente y fuerzan el filtro exacto correspondiente, aunque otro filtro intente sustituirlo. Al cambiar de cliente se limpian los resultados anteriores y se descartan respuestas pendientes de la consulta previa. Esto es una simulación local; no constituye autenticación ni una barrera de acceso entre usuarios de un equipo que dispone de los archivos completos.
 
 ## Formatos y límites
 
@@ -40,18 +52,18 @@ La prueba automatizada procesa un flujo JSON válido de exactamente 800 MiB con 
 
 Se incluyen perfiles para los encabezados SEP y SEF recibidos: `FEC_TRANSACCION`, `IMP_TRANSACCION`, `CVE_ESTATUSTXN`, `CVE_MONEDASISTEMA`, `NUM_CLIENTE`, referencias, sucursales, autorizaciones y `NUM_AUTELIS151`, cuando existen. La tabla se adapta al producto; el detalle conserva todas las columnas originales. Los filtros exactos por número de cliente y cuenta permiten emular la consulta de un cliente dentro de un archivo con múltiples clientes. No sustituyen autenticación ni autorización de acceso.
 
-Los ejemplos de `examples/sep-con-autelis.csv`, `examples/sep-sin-autelis.csv` y `examples/sef.csv` son **sintéticos**. Los archivos del usuario no se incorporan al repositorio ni al HTML. Las pruebas usan únicamente ejemplos ficticios. Los productos precargados no representan un catálogo real de contratos.
+Los ejemplos de `examples/sep-con-autelis.csv`, `examples/sep-sin-autelis.csv` y `examples/sef.csv` son **sintéticos** y se usan únicamente como archivos de prueba; nunca se cargan automáticamente en la vista. Los archivos del usuario no se incorporan al repositorio ni al HTML. Las pruebas usan únicamente ejemplos ficticios. Los productos precargados no representan un catálogo real de contratos.
 
 La demostración trabaja con archivos locales. En una implementación posterior, un adaptador autorizado podrá entregar los movimientos de la vista de Teradata al mismo modelo de consulta; esta versión no incluye conexión a Teradata.
 
 ## Desarrollo y verificación
 
-- `src/shell.html`, `src/styles.css`, `src/core.js`, `src/app.js`, `src/files.js`, `src/worker.js`: fuentes editables; el worker y todos los lectores se incluyen dentro del HTML portable.
+- `src/shell.html`, `src/styles.css`, `src/core.js`, `src/app.js`, `src/client.js`, `src/files.js`, `src/worker.js`: fuentes editables; las dos vistas, el worker y todos los lectores se incluyen dentro del HTML portable.
 - `vendor/xlsx.full.min.js`: SheetJS Community Edition 0.20.3, incluida localmente bajo Apache 2.0; licencia en `vendor/SHEETJS-LICENSE.txt`. Distribución oficial: https://docs.sheetjs.com/docs/getting-started/installation/standalone/.
 - `build.ps1`: genera el HTML portable desde las fuentes, sin descargar dependencias. Ejecutar `powershell -ExecutionPolicy Bypass -File ./build.ps1`.
 - `tests/core.test.cjs`: pruebas de importes, fechas, normalización, contenido no confiable y lectura de Excel con múltiples hojas. Ejecutar con Node.js: `node tests/core.test.cjs`.
 - `tests/worker.test.cjs`: JSON incremental, límite de 800 MiB, más de 50,000 movimientos, filtros, detalle, exportación y XLS/XLSX. Ejecutar `node tests/worker.test.cjs`.
-- `tests/app.test.cjs`: integración de interfaz y worker empaquetado, cinco productos y persistencia independiente de ambas variantes SEP. Ejecutar `node tests/app.test.cjs`. Usa un DOM mínimo para probar comportamiento; no sustituye una revisión visual en navegador.
+- `tests/app.test.cjs`: inicio sin datos ficticios, integración de ambas vistas y worker empaquetado, cinco productos, variantes SEP independientes, totales globales de tres productos por moneda, aislamiento del detalle/exportación por cliente, selección de productos y filtros. Ejecutar `node tests/app.test.cjs`. Usa un DOM mínimo para probar comportamiento; no sustituye una revisión visual en navegador.
 - `tests/files.test.cjs`: CSV incremental, ZIP/CRC32, perfiles SEP/SEF, monedas confirmadas, filtros por cliente/cuenta y exclusión de filas incompletas. Ejecutar `node tests/files.test.cjs` con Node.js 22 o posterior (requiere `DecompressionStream` con deflate-raw).
 
 La política de contenido del HTML bloquea conexiones de red. Las celdas y nombres de archivo se insertan como texto escapado. No hay telemetría ni almacenamiento persistente.

@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=(n,c)=>{try{return new Intl.NumberFormat('es-MX',{style:'currency',currency:c}).format(n)+' '+c;}catch{return new Intl.NumberFormat('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n)+' · Moneda código '+c;}};
 const dateLabel=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4):'Sin fecha válida';
-const labels={date:'Fecha *',reference:'Referencia',name:'Cliente / Ordenante',amount:'Importe *',status:'Estado',currency:'Moneda'};
+const labels={clientId:'Número de cliente',date:'Fecha *',reference:'Referencia',name:'Cliente / Ordenante',amount:'Importe *',status:'Estado',currency:'Moneda'};
 let products=[],selected=0,page=1,filtered=[],book=null,pendingFile='',headers=[],importToken=0,importing=false,importWorker=null,renderToken=0;
 const pageSize=10;
 const MAX_FILE_BYTES=800*1024*1024;
@@ -22,17 +22,16 @@ function createLocalWorker(){
  worker.request=(action,args={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});worker.postMessage({id,action,...args});});
  worker.dispose=()=>{worker.terminate();for(const request of pending.values())request.reject(Error('Carga cancelada.'));pending.clear();};return worker;
 }
-function makeDemo(){
+function initializeProducts(){
  products.forEach(p=>p.variants.forEach(v=>v.worker?.dispose()));
- const names=['Comercial del Centro','Distribuidora Horizonte','Servicios del Bajío','Grupo Altavista','Insumos del Norte','Soluciones del Pacífico'];
- products=catalog.map((name,p)=>({name,activeVariant:0,variants:(p===0?['Sin Autelis','Con Autelis']:['Archivo de conciliación']).map((variant,v)=>({variant,source:'Datos ficticios de demostración',demo:true,rows:Array.from({length:27-p*3-v*2},(_,i)=>{const statuses=['Aplicado','Aplicado','Pendiente','Aplicado','Rechazado'];const row={id:i+1,date:'2026-10-'+String(28-i%24).padStart(2,'0'),reference:(p+1)+'024'+String(85300+i+v*100),name:names[(i+p)%names.length],amount:Math.round((1750+i*827.45+p*953+v*400)*100)/100,currency:'MXN',status:statuses[(i+p)%5],rawStatus:statuses[(i+p)%5]};row.raw=[['Fecha',row.date],['Referencia',row.reference],['Cliente',row.name],['Importe',String(row.amount)],['Moneda',row.currency],['Estado',row.status],['Convenio','DEMO-'+(700+p)]];return row;})}))})); selected=0;renderProducts();resetFilters();
+ products=catalog.map((name,p)=>({name,activeVariant:0,variants:(p===0?['Sin Autelis','Con Autelis']:['Archivo de conciliación']).map(variant=>({variant,source:'Sin archivo cargado',worker:null,count:0,currencies:[]}))}));selected=0;renderProducts();resetFilters();
 }
 function renderProducts(){
- $('products').innerHTML=products.map((p,i)=>{const d=current(p);return '<button class="product '+(i===selected?'active':'')+'" aria-pressed="'+(i===selected)+'" data-product="'+i+'"><span class="icon" aria-hidden="true">'+['▤','⇄','▦'][i%3]+'</span>'+(i===selected?'<span class="dot" aria-hidden="true">●</span>':'')+'<strong>'+escapeHTML(p.name)+'</strong><small>'+(d.count??d.rows.length).toLocaleString('es-MX')+' movimientos · '+(d.demo?'Ejemplo ficticio':'Archivo local')+(p.variants.length>1?'<br>Con y sin Autelis':'')+'</small></button>';}).join('');
+ $('products').innerHTML=products.map((p,i)=>{const d=current(p);return '<button class="product '+(i===selected?'active':'')+'" aria-pressed="'+(i===selected)+'" data-product="'+i+'"><span class="icon" aria-hidden="true">'+['▤','⇄','▦'][i%3]+'</span>'+(i===selected?'<span class="dot" aria-hidden="true">●</span>':'')+'<strong>'+escapeHTML(p.name)+'</strong><small>'+d.count.toLocaleString('es-MX')+' movimientos · '+(d.worker?'Archivo local':'Sin archivo')+(p.variants.length>1?'<br>Con y sin Autelis':'')+'</small></button>';}).join('');
  $('targetProduct').innerHTML=products.map((p,i)=>'<option value="'+i+'">'+escapeHTML(p.name)+'</option>').join('');$('targetProduct').value=selected;
  $('productTitle').textContent=products[selected].name;$('source').textContent=current().source;
  $('sourceVariant').innerHTML=products[selected].variants.map((v,i)=>'<option value="'+i+'">'+escapeHTML(v.variant)+'</option>').join('');$('sourceVariant').value=products[selected].activeVariant;$('sourceVariantField').classList.toggle('hidden',products[selected].variants.length===1);
- const currencies=current().currencies||[...new Set(current().rows.map(r=>r.currency))].sort();$('currency').innerHTML='<option value="">Todas</option>'+currencies.map(c=>'<option>'+escapeHTML(c)+'</option>').join('');updateTargetVariant();
+ const currencies=current().currencies;$('currency').innerHTML='<option value="">Todas</option>'+currencies.map(c=>'<option>'+escapeHTML(c)+'</option>').join('');updateTargetVariant();
  const p=current();$('status').innerHTML='<option value="">Todos los estados</option><option>Aplicado</option><option>Pendiente</option><option>Rechazado</option><option>Sin clasificar</option>'+(p.rawStatuses||[]).map(s=>'<option value="code:'+escapeHTML(s)+'">Valor original: '+escapeHTML(s)+'</option>').join('');$('clientFilters').classList.toggle('hidden',!p.profile);bankTableHead(p.profile);$('datasetWarning').textContent=p.warning||'';$('datasetWarning').classList.toggle('hidden',!p.warning);
 }
 function updateTargetVariant(){const p=products[Number($('targetProduct').value)];$('targetVariant').innerHTML=p.variants.map((v,i)=>'<option value="'+i+'">'+escapeHTML(v.variant)+'</option>').join('');$('targetVariant').value=p.activeVariant||0;$('targetVariantField').classList.toggle('hidden',p.variants.length===1);}
@@ -42,16 +41,11 @@ function render(){
  const q=ReconCore.clean($('search').value),from=$('from').value,to=$('to').value,state=$('status').value,currency=$('currency').value;
  const invalid=from&&to&&from>to;$('filterError').classList.toggle('hidden',!invalid);$('filterError').textContent=invalid?'La fecha inicial debe ser anterior o igual a la fecha final.':'';
  if(current().worker){renderRemote(token,invalid);return;}
- filtered=invalid?[]:current().rows.filter(r=>(!q||ReconCore.clean(r.raw.flat().join(' ')).includes(q))&&(!from||r.date&&r.date>=from)&&(!to||r.date&&r.date<=to)&&(!state||r.status===state)&&(!currency||r.currency===currency));
- const totals=new Map();filtered.forEach(r=>{if(r.amount!==null)totals.set(r.currency,(totals.get(r.currency)||0)+Math.round(r.amount*100));});
- $('total').textContent=totals.size===1?money([...totals.values()][0]/100,[...totals.keys()][0]):totals.size>1?'Varias monedas':'—';
- const missing=filtered.filter(r=>r.amount===null).length;$('totalFoot').textContent=(totals.size>1?[...totals].map(([c,n])=>money(n/100,c)).join(' · '):'Según los filtros seleccionados')+(missing?' · '+missing+' importes sin valor válido':'');
- $('applied').textContent=filtered.filter(r=>r.status==='Aplicado').length.toLocaleString('es-MX');$('pending').textContent=filtered.filter(r=>r.status==='Pendiente').length.toLocaleString('es-MX');$('count').textContent=filtered.length.toLocaleString('es-MX');
- $('rejected').textContent=filtered.filter(r=>r.status==='Rechazado').length+' rechazados · '+filtered.filter(r=>r.status==='Sin clasificar').length+' sin clasificar';
- const pages=Math.max(1,Math.ceil(filtered.length/pageSize));page=Math.min(page,pages);const start=(page-1)*pageSize;
- $('rows').innerHTML=filtered.slice(start,start+pageSize).map(r=>'<tr><td>'+dateLabel(r.date)+'</td><td class="ref">'+escapeHTML(r.reference||'Sin referencia')+'</td><td>'+escapeHTML(r.name||'No informado')+'</td><td class="money">'+escapeHTML(r.amount===null?'Importe no válido':money(r.amount,r.currency))+'</td><td><span class="badge '+r.status.toLowerCase().replace(' ','-')+'">'+r.status+'</span></td><td><button class="detailbtn" data-detail="'+r.id+'" aria-label="Ver detalle de '+escapeHTML(r.reference||r.id)+'">Ver detalle ↗</button></td></tr>').join('')||'<tr><td colspan="6" class="empty">No hay movimientos para esta consulta. Cambia los filtros o carga un archivo para este producto.</td></tr>';
- $('pageInfo').textContent=filtered.length?'Mostrando '+(start+1)+'–'+Math.min(start+pageSize,filtered.length)+' de '+filtered.length+' movimientos':'0 movimientos';$('pageNumber').textContent=page+' / '+pages;$('prev').disabled=page<=1;$('next').disabled=page>=pages;$('exportBtn').disabled=!filtered.length;
- const p=current();$('notice').textContent=p.demo?'DEMO · Todos los movimientos de este producto son ficticios. Carga un archivo para consultar tus operaciones.':'ARCHIVO LOCAL · '+p.source+' · Los estados provienen del archivo; el demo no realiza conciliación automática.';
+ filtered=[];page=1;
+ $('total').textContent='—';$('totalFoot').textContent='Carga un archivo para consultar los importes';$('applied').textContent='—';$('pending').textContent='—';$('count').textContent='0';$('rejected').textContent='Sin archivo cargado';
+ $('rows').innerHTML='<tr><td colspan="6" class="empty">Sin movimientos cargados. Carga un archivo para consultar este producto.</td></tr>';
+ $('pageInfo').textContent='0 movimientos';$('pageNumber').textContent='1 / 1';$('prev').disabled=true;$('next').disabled=true;$('exportBtn').disabled=true;
+ $('notice').textContent='Selecciona un producto y carga un archivo para consultar sus movimientos.';
 }
 const getFilter=()=>({q:ReconCore.clean($('search').value),from:$('from').value,to:$('to').value,status:$('status').value,currency:$('currency').value,clientId:$('clientId').value.trim(),account:$('account').value.trim()});
 async function renderRemote(token,invalid){
@@ -88,23 +82,23 @@ async function commitImport(){
  clearError();if(!book||importing||!importWorker)return;
  const map=Object.fromEntries(Object.keys(labels).map(k=>[k,Number($('map-'+k).value)]));
  if(map.date<0||map.amount<0){showError('Selecciona las columnas de fecha e importe para continuar.');return;}
- const columns=Object.values(map).filter(v=>v>=0);if(new Set(columns).size!==columns.length){showError('Cada campo debe usar una columna diferente.');return;}
+ const columns=Object.entries(map).filter(([key,value])=>key!=='clientId'&&value>=0).map(([,value])=>value);if(new Set(columns).size!==columns.length||(map.clientId>=0&&Object.entries(map).some(([key,value])=>!['name','clientId'].includes(key)&&value===map.clientId))){showError('Cada campo debe usar una columna diferente.');return;}
  const target=Number($('targetProduct').value),variant=Number($('targetVariant').value),token=importToken,worker=importWorker;
  importing=true;$('confirmImport').disabled=true;
  try{const result=await worker.request('commit',{map,currency:$('defaultCurrency').value});if(token!==importToken)return;
  const p=products[target],old=p.variants[variant];old.worker?.dispose();
- p.variants[variant]={variant:old.variant,worker,rows:[],count:result.count,currencies:result.currencies,rawStatuses:result.rawStatuses,profile:result.profile,warning:result.warning,demo:false,source:pendingFile+' · '+$('sheet').value+(result.badDate||result.badAmount?' · Revisar: '+result.badDate+' fechas y '+result.badAmount+' importes sin valor válido':'')};p.activeVariant=variant;selected=target;importWorker=null;$('importDialog').close();renderProducts();resetFilters();
+ p.variants[variant]={variant:old.variant,worker,count:result.count,currencies:result.currencies,rawStatuses:result.rawStatuses,profile:result.profile,warning:result.warning,source:pendingFile+' · '+$('sheet').value+(result.badDate||result.badAmount?' · Revisar: '+result.badDate+' fechas y '+result.badAmount+' importes sin valor válido':'')};p.activeVariant=variant;selected=target;globalThis.clientFilesChanged?.();importWorker=null;$('importDialog').close();renderProducts();resetFilters();
  }catch(e){if(token===importToken){showError(e.message);$('confirmImport').disabled=false;}}
  finally{if(token===importToken)importing=false;}
 }
 async function detail(id){
- const p=current(),name=displayName(),token=renderToken;
- try{const row=p.worker?await p.worker.request('detail',{rowId:id}):p.rows.find(r=>r.id===id);if(!row||token!==renderToken)return;$('detailSubtitle').textContent=name+' · '+(row.reference||'Sin referencia');$('detailFields').innerHTML=row.raw.map(([k,v])=>'<div><small>'+escapeHTML(k)+'</small>'+escapeHTML(v||'—')+'</div>').join('');$('detailDialog').showModal();}catch(e){$('notice').textContent=e.message;}
+ const p=current(),name=displayName(),token=renderToken;if(!p.worker)return;
+ try{const row=await p.worker.request('detail',{rowId:id});if(!row||token!==renderToken)return;$('detailSubtitle').textContent=name+' · '+(row.reference||'Sin referencia');$('detailFields').innerHTML=row.raw.map(([k,v])=>'<div><small>'+escapeHTML(k)+'</small>'+escapeHTML(v||'—')+'</div>').join('');$('detailDialog').showModal();}catch(e){$('notice').textContent=e.message;}
 }
 async function download(){
- const p=current(),name=displayName();$('exportBtn').disabled=true;
- try{const meta={producto:products[selected].name,variante:p.variant,origen:p.source,advertencia:p.warning||'',datosFicticios:p.demo};
- const blob=p.worker?await p.worker.request('export',{filter:getFilter(),meta}):new Blob([JSON.stringify({...meta,movimientos:filtered.map(r=>({fecha:r.date,referencia:r.reference,cliente:r.name,importe:r.amount,moneda:r.currency,estado:r.rawStatus,datosOriginales:r.raw}))},null,2)],{type:'application/json;charset=utf-8'});
+ const p=current(),name=displayName();if(!p.worker)return;$('exportBtn').disabled=true;
+ try{const meta={producto:products[selected].name,variante:p.variant,origen:p.source,advertencia:p.warning||''};
+ const blob=await p.worker.request('export',{filter:getFilter(),meta});
  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='cobranza-'+ReconCore.clean(name)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  }catch(e){$('notice').textContent='No se pudo exportar: '+e.message;}finally{$('exportBtn').disabled=false;}
 }
@@ -115,5 +109,5 @@ $('prev').onclick=()=>{page--;render();};$('next').onclick=()=>{page++;render();
 $('sourceVariant').onchange=()=>{products[selected].activeVariant=Number($('sourceVariant').value);renderProducts();resetFilters();};$('targetProduct').onchange=updateTargetVariant;
 $('openImport').onclick=()=>{if(importing)return;importToken++;book=null;$('file').value='';$('targetProduct').value=selected;updateTargetVariant();$('importSetup').classList.add('hidden');$('importProgressArea').classList.add('hidden');$('importWarning').classList.add('hidden');$('confirmImport').disabled=true;clearError();$('importDialog').showModal();};
 $('cancelImport').onclick=()=>{$('importDialog').close();};$('importDialog').addEventListener('close',()=>{importToken++;book=null;importing=false;$('file').disabled=false;if(importWorker){importWorker.dispose();importWorker=null;}});$('file').onchange=loadFile;$('sheet').onchange=prepareGrid;$('headerRow').onchange=prepareGrid;$('confirmImport').onclick=commitImport;
-$('exportBtn').onclick=download;$('closeDetail').onclick=()=>$('detailDialog').close();$('helpBtn').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=()=>$('helpDialog').close();$('resetDemo').onclick=()=>{if(confirm('¿Restablecer los ejemplos ficticios y descartar todos los archivos cargados?')){makeDemo();$('helpDialog').close();}};
-makeDemo();
+$('exportBtn').onclick=download;$('closeDetail').onclick=()=>$('detailDialog').close();$('helpBtn').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=()=>$('helpDialog').close();
+initializeProducts();
