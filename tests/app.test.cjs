@@ -1,0 +1,29 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+const source=html.match(/<script id="workerSource" type="text\/plain">([\s\S]*?)<\/script>/)[1];
+const elements=new Map();
+function element(id){if(!elements.has(id)){let markup='';const e={id,value:'',textContent:'',files:[],disabled:false,classList:{add(){},remove(){},toggle(){}},events:{},addEventListener(event,fn){this.events[event]=fn;},showModal(){this.open=true;},close(){this.open=false;this.events.close?.();},click(){}};Object.defineProperty(e,'innerHTML',{get:()=>markup,set:text=>{markup=text;const options=[...text.matchAll(/<option(?: value="([^"]*)")?([^>]*)>(.*?)<\/option>/g)];if(options.length){const o=options.find(o=>o[2].includes('selected'))||options[0];e.value=o[1]??o[3];}for(const select of text.matchAll(/<select id="([^"]*)">([\s\S]*?)<\/select>/g))element(select[1]).innerHTML=select[2];}});elements.set(id,e);}return elements.get(id);}
+element('workerSource').textContent=source;
+const urls=new Map();let sequence=0;
+class LocalWorker{
+ constructor(url){this.alive=true;this.ready=urls.get(url).text().then(code=>{const context={TextDecoder,Blob,setTimeout,self:{postMessage:data=>{if(this.alive)this.onmessage?.({data});}}};vm.createContext(context);vm.runInContext(code,context);this.context=context;});}
+ postMessage(data){this.ready.then(()=>{if(this.alive)return this.context.self.onmessage({data});}).catch(error=>this.onerror?.({message:error.message}));}
+ terminate(){this.alive=false;}
+}
+const context={document:{getElementById:element,createElement:()=>element('downloadLink')},Worker:LocalWorker,Blob,URL:{createObjectURL(blob){const key='blob:test-'+(++sequence);urls.set(key,blob);return key;},revokeObjectURL(){}},setTimeout,clearTimeout,confirm:()=>true};
+vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),context);vm.runInContext(fs.readFileSync(path.join(root,'src/app.js'),'utf8'),context);
+function jsonFile(rows,name='sep.json'){const blob=new Blob([JSON.stringify(rows)]);return {name,size:blob.size,stream:()=>blob.stream()};}
+async function run(){
+ assert.equal(vm.runInContext('products.length',context),5);assert.equal(vm.runInContext('products[0].variants.length',context),2);assert.ok(element('products').innerHTML.includes('Concentración de Fondos'));
+ element('openImport').onclick();element('targetProduct').value='0';element('targetVariant').value='0';element('file').files=[jsonFile([{fecha:'2026-10-28',importe:100,referencia:'SIN-001',estado:'Aplicado'}])];await element('file').onchange();await element('confirmImport').onclick();await vm.runInContext('renderRemote(++renderToken,false)',context);assert.equal(element('total').textContent.includes('100.00'),true);assert.ok(element('rows').innerHTML.includes('SIN-001'));
+ element('openImport').onclick();element('targetVariant').value='1';element('file').files=[jsonFile([{fecha:'2026-10-29',importe:200,referencia:'CON-001',estado:'Pendiente'}])];await element('file').onchange();await element('confirmImport').onclick();await vm.runInContext('renderRemote(++renderToken,false)',context);assert.ok(element('rows').innerHTML.includes('CON-001'));
+ element('sourceVariant').value='0';element('sourceVariant').onchange();await vm.runInContext('renderRemote(++renderToken,false)',context);assert.ok(element('rows').innerHTML.includes('SIN-001'));assert.ok(!element('rows').innerHTML.includes('CON-001'));
+ element('openImport').onclick();element('file').files=[{name:'grande.json',size:800*1024*1024+1}];await element('file').onchange();assert.ok(element('importError').textContent.includes('800 MB'));element('cancelImport').onclick();assert.equal(vm.runInContext('current().count',context),1);
+ element('openImport').onclick();const delayed=jsonFile([{fecha:'2026-10-30',importe:999,referencia:'NO-DEBE-REEMPLAZAR'}]);const stream=delayed.stream;delayed.stream=()=>{const reader=stream().getReader();return {getReader:()=>({async read(){await new Promise(resolve=>setTimeout(resolve,5));return reader.read();},releaseLock(){reader.releaseLock();}})};};element('file').files=[delayed];const loading=element('file').onchange();element('cancelImport').onclick();await loading;assert.equal(vm.runInContext('current().count',context),1);assert.equal(vm.runInContext('current().worker!==null',context),true);
+ await vm.runInContext('detail(1)',context);assert.ok(element('detailFields').innerHTML.includes('SIN-001'));
+ element('search').value='inexistente';await vm.runInContext('renderRemote(++renderToken,false)',context);assert.equal(element('count').textContent,'0');assert.equal(element('exportBtn').disabled,true);
+ element('clearFilters').onclick();await vm.runInContext('renderRemote(++renderToken,false)',context);await element('exportBtn').onclick();assert.ok(element('downloadLink').download.includes('sinautelis'));
+ vm.runInContext('makeDemo()',context);assert.equal(vm.runInContext('current().demo',context),true);
+ console.log('OK: integración de interfaz y worker empaquetado, cinco productos, variantes SEP independientes, reemplazo, detalle, filtros, exportación y rechazo de más de 800 MB.');
+}
+globalThis.testRun=run();if(require.main===module)globalThis.testRun.catch(error=>{console.error(error);process.exitCode=1;});
