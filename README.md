@@ -12,7 +12,7 @@ La aplicación tiene tres vistas: **Carga de archivos** para incorporar y revisa
 4. Consulta los movimientos con búsqueda, fechas, estado, moneda, paginación y detalle de todas las columnas originales. Los resúmenes corresponden al resultado filtrado; las monedas no se suman entre sí.
 5. **Exportar JSON** descarga solamente el resultado filtrado. Puede importarse de nuevo.
 
-Cada carga reemplaza los movimientos de un solo producto y variante. Cancelar una carga conserva los datos anteriores. Los datos permanecen en memoria y se descartan al cerrar o recargar la página. No hay autenticación real ni conciliación automática. La interfaz utiliza una paleta azul, rojo y blanco de Banamex; es una demostración.
+Cada carga reemplaza los movimientos de un solo producto y variante. Cancelar una carga conserva los datos anteriores. Los datos permanecen en memoria y se descartan al cerrar o recargar la página. No hay autenticación real ni conciliación automática. La interfaz reutiliza el logotipo PNG original y el estilo de perfilamiento-banamex: barra lateral blanca, navegación azul, fondo gris claro, tipografía Arial y tarjetas con bordes suaves. Es una demostración.
 
 ## Consulta del cliente
 
@@ -64,6 +64,10 @@ Se incluyen perfiles para los encabezados SEP y SEF recibidos: `FEC_TRANSACCION`
 Los ejemplos de `examples/sep-con-autelis.csv`, `examples/sep-sin-autelis.csv` y `examples/sef.csv` son **sintéticos** y se usan únicamente como archivos de prueba; nunca se cargan automáticamente en la vista. Los archivos del usuario no se incorporan al repositorio ni al HTML. Las pruebas usan únicamente ejemplos ficticios. Los productos precargados no representan un catálogo real de contratos.
 
 La demostración trabaja con archivos locales. En una implementación posterior, un adaptador autorizado podrá entregar los movimientos de la vista de Teradata al mismo modelo de consulta; esta versión no incluye conexión a Teradata.
+
+## Identidad visual
+
+El logotipo de `assets/banamex-logo.png` es el mismo archivo usado por perfilamiento-banamex. `src/brand.css` adapta su estilo a las tres vistas de conciliación. `build.ps1` incorpora el PNG como una URL de datos en el HTML, por lo que copiar únicamente `index.html` conserva el logotipo y todos los estilos sin conexión.
 
 ## Desarrollo y verificación
 
